@@ -1,0 +1,7 @@
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: microphone=(), camera=(), geolocation=()
+  Cross-Origin-Opener-Policy: same-origin
+  Content-Security-Policy: default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://unpkg.com https://cdn.tailwindcss.com https://fonts.googleapis.com https://fonts.gstatic.com https://cdnjs.cloudflare.com https://pub-2c97cfe777b5493d8fe76e1f1695564d.r2.dev; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: blob:;

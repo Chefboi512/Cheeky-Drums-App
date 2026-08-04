@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cheeky Drums</title>
+  
+  <!-- React, ReactDOM, Babel, and Tailwind CDNs for standalone HTML execution -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@700&family=Caveat:wght@700&display=swap" rel="stylesheet" />
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: black;
+    }
+
+    /* Hardware Slider Thumb Customization */
+    .hw-slider {
+      -webkit-appearance: none;
+      background: #111312;
+      border-radius: 12px;
+      box-shadow: inset -2px 3px 2px 0px rgba(0, 0, 0, 0.7);
+      outline: none;
+      position: relative;
+      z-index: 10;
+    }
+
+    .hw-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 24px;
+      height: 40px;
+      background: linear-gradient(90deg, #222 0%, #444 45%, #fff 50%, #444 55%, #222 100%);
+      border: 1px solid #000;
+      border-radius: 4px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.8), inset 0 1px 1px rgba(255,255,255,0.3);
+      cursor: pointer;
+    }
+
+    .hw-slider.compact-thumb::-webkit-slider-thumb {
+      width: 18px;
+      height: 30px;
+    }
+
+    @keyframes massive-shockwave {
+      0% { width: 0px; height: 0px; opacity: 1; border-width: 6px; }
+      100% { width: 320px; height: 320px; opacity: 0; border-width: 0px; }
+    }
+
+    /* Subtle Blush fading Easter egg animation */
+    @keyframes blush-fade {
+      0% { opacity: 0; filter: blur(4px); }
+      15% { opacity: var(--blush-intensity); filter: blur(8px); }
+      100% { opacity: 0; filter: blur(20px); }
+    }
+
+    /* Title Screen "Alive" Animations */
+    @keyframes door-breathe {
+      0% { filter: drop-shadow(0 15px 20px rgba(0,0,0,0.7)); }
+      100% { filter: drop-shadow(0 35px 50px rgba(0,0,0,0.95)); }
+    }
+    
+    @keyframes float-text {
+      0% { transform: translateY(0px) rotate(-2deg); }
+      50% { transform: translateY(-8px) rotate(-1deg); }
+      100% { transform: translateY(0px) rotate(-2deg); }
+    }
+
+    @keyframes float-btn {
+      0% { transform: translateY(0px) rotate(-1deg); }
+      50% { transform: translateY(-4px) rotate(0deg); }
+      100% { transform: translateY(0px) rotate(-1deg); }
+    }
+
+    .door-alive {
+      animation: door-breathe 4s infinite alternate ease-in-out;
+    }
+    .text-alive {
+      animation: float-text 6s infinite ease-in-out;
+    }
+    .btn-alive {
+      animation: float-btn 5s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- ADVANCED DSP AUDIO ENGINE ---
+    class DrumSampler {
+      constructor() {
+        this.ctx = null;
+        this.compressor = null;
+        
+        this.dryBus = null;
+        this.reverbBus = null;
+        this.reverbNode = null;
+        this.reverbGain = null;
+        this.filter1 = null;
+        this.filter2 = null;
+        this.driveNode = null;
+
+        this.buffers = {
+          kick: null,
+          snare: null,
+          clap: null,
+          hat: null
+        };
+
+        this.urls = {
+          kick: 'https://pub-2c97cfe777b5493d8fe76e1f1695564d.r2.dev/BUM%20DRUMS%20KIT/tight%20kick%20.wav',
+          snare: 'https://pub-2c97cfe777b5493d8fe76e1f1695564d.r2.dev/BUM%20DRUMS%20KIT/snare3.wav',
+          clap: 'https://pub-2c97cfe777b5493d8fe76e1f1695564d.r2.dev/BUM%20DRUMS%20KIT/Clap%20-%20Luger.wav',
+          hat: 'https://pub-2c97cfe777b5493d8fe76e1f1695564d.r2.dev/BUM%20DRUMS%20KIT/Ofive%20-%20Cream%20-%20Closed%20HiHat%2005.wav'
+        };
+      }
+
+      async init() {
+        if (this.ctx && this.ctx.state === 'running') return;
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioContext();
+
+        this.dryBus = this.ctx.createGain();
+        this.reverbBus = this.ctx.createGain();
+        
+        this.reverbNode = this.ctx.createConvolver();
+        this.reverbNode.buffer = this.createReverbIR(this.ctx, 1.5, 3.0); 
+        this.reverbGain = this.ctx.createGain();
+        this.reverbGain.gain.value = 0.0; 
+
+        this.reverbBus.connect(this.reverbNode);
+        this.reverbNode.connect(this.reverbGain);
+
+        this.filter1 = this.ctx.createBiquadFilter();
+        this.filter1.type = 'lowpass';
+        this.filter2 = this.ctx.createBiquadFilter();
+        this.filter2.type = 'lowpass';
+        
+        this.dryBus.connect(this.filter1);
+        this.reverbGain.connect(this.filter1);
+        this.filter1.connect(this.filter2);
+
+        this.driveNode = this.ctx.createWaveShaper();
+        this.driveNode.curve = this.makeTapeCurve(0);
+        this.driveNode.oversample = '4x';
+        this.filter2.connect(this.driveNode);
+
+        this.compressor = this.ctx.createDynamicsCompressor();
+        this.compressor.threshold.value = -12;
+        this.compressor.knee.value = 10;
+        this.compressor.ratio.value = 4;
+        this.compressor.attack.value = 0.005;
+        this.compressor.release.value = 0.1;
+
+        const masterOut = this.ctx.createGain();
+        masterOut.gain.value = 0.9;
+
+        this.driveNode.connect(this.compressor);
+        this.compressor.connect(masterOut);
+        masterOut.connect(this.ctx.destination);
+
+        this.setFilter(100, 0); 
+
+        await this.loadAllSamples();
+      }
+
+      createReverbIR(ctx, duration = 2.0, decay = 2.0) {
+        const sampleRate = ctx.sampleRate;
+        const length = sampleRate * duration;
+        const impulse = ctx.createBuffer(2, length, sampleRate);
+        const left = impulse.getChannelData(0);
+        const right = impulse.getChannelData(1);
+        
+        for (let i = 0; i < length; i++) {
+            const n = i / length;
+            const env = Math.pow(1 - n, decay);
+            left[i] = (Math.random() * 2 - 1) * env;
+            right[i] = (Math.random() * 2 - 1) * env;
+        }
+        return impulse;
+      }
+
+      makeTapeCurve(amount) {
+        const k = amount * 10;
+        const n_samples = 44100;
+        const curve = new Float32Array(n_samples);
+        for (let i = 0; i < n_samples; ++i) {
+          const x = (i * 2) / n_samples - 1;
+          curve[i] = Math.tanh(x * (1 + k));
+        }
+        return curve;
+      }
+
+      setDrive(amount) {
+          if (!this.driveNode) return;
+          this.driveNode.curve = this.makeTapeCurve(amount / 100);
+      }
+
+      setReverb(amount) {
+          if (!this.reverbGain) return;
+          this.reverbGain.gain.setTargetAtTime(amount / 100, this.ctx.currentTime, 0.05);
+      }
+
+      setFilter(freqPercent, resPercent) {
+          if (!this.filter1) return;
+          const minFreq = 20;
+          const maxFreq = 20000;
+          const f = minFreq * Math.pow(maxFreq/minFreq, freqPercent / 100);
+          const q = (resPercent / 100) * 15;
+          
+          this.filter1.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.05);
+          this.filter2.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.05);
+          this.filter1.Q.setTargetAtTime(q, this.ctx.currentTime, 0.05);
+          this.filter2.Q.setTargetAtTime(q, this.ctx.currentTime, 0.05);
+      }
+
+      async loadAllSamples() {
+        const loadSample = async (key, url) => {
+          try {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            this.buffers[key] = await this.ctx.decodeAudioData(arrayBuffer);
+          } catch (err) {
+            console.error(`Failed to load ${key}:`, err);
+          }
+        };
+
+        const promises = Object.keys(this.urls).map(key => loadSample(key, this.urls[key]));
+        await Promise.all(promises);
+      }
+
+      playSample(bufferKey, options = {}) {
+        const { volume = 1.0, pitch = 1.0, decay = 1.0, sendReverb = false } = options;
+        if (!this.ctx || !this.buffers[bufferKey]) return;
+        
+        const source = this.ctx.createBufferSource();
+        source.buffer = this.buffers[bufferKey];
+        source.playbackRate.value = pitch;
+        
+        const envelope = this.ctx.createGain();
+        const now = this.ctx.currentTime;
+        envelope.gain.setValueAtTime(volume, now);
+        
+        const tailSeconds = Math.max(0.01, decay * 1.5); 
+        envelope.gain.exponentialRampToValueAtTime(0.001, now + tailSeconds);
+        
+        source.connect(envelope);
+        if (sendReverb) {
+            envelope.connect(this.reverbBus);
+        }
+        envelope.connect(this.dryBus);
+        
+        source.start(now);
+        source.stop(now + tailSeconds + 0.1);
+      }
+    }
+
+    const audioEngine = new DrumSampler();
+
+    const MESH_IMAGE_URL = "https://pub-2c97cfe777b5493d8fe76e1f1695564d.r2.dev/booty%20pic%20.webp";
+    const DOOR_IMAGE_URL = "https://pub-2c97cfe777b5493d8fe76e1f1695564d.r2.dev/IMG_5058.webp";
+
+    const LEFT_MESH = [{"x":2.05,"y":55.15},{"x":4.39,"y":55.56},{"x":6.67,"y":55.84},{"x":8.71,"y":56.04},{"x":10.61,"y":56.28},{"x":12.42,"y":56.52},{"x":14.09,"y":56.72},{"x":15.68,"y":56.84},{"x":17.42,"y":56.96},{"x":19.24,"y":57.12},{"x":21.06,"y":57.32},{"x":22.8,"y":57.52},{"x":24.7,"y":57.68},{"x":26.67,"y":57.92},{"x":28.48,"y":58.16},{"x":30.45,"y":58.36},{"x":32.27,"y":58.64},{"x":34.17,"y":58.8},{"x":35.98,"y":58.97},{"x":37.65,"y":59.01},{"x":39.55,"y":59.01},{"x":41.44,"y":58.64},{"x":43.03,"y":57.84},{"x":44.62,"y":56.84},{"x":45.76,"y":55.6},{"x":46.89,"y":54.23},{"x":48.26,"y":52.99},{"x":49.24,"y":51.38},{"x":49.62,"y":49.78},{"x":50,"y":47.77},{"x":50.76,"y":45.77},{"x":51.67,"y":43.8},{"x":52.5,"y":41.88},{"x":52.8,"y":40.23},{"x":52.73,"y":38.43},{"x":51.89,"y":36.9},{"x":51.82,"y":35.18},{"x":51.82,"y":33.65},{"x":51.82,"y":32.13},{"x":51.36,"y":30.69},{"x":50,"y":29.44},{"x":48.64,"y":28.56},{"x":47.27,"y":27.52},{"x":45.91,"y":26.84},{"x":44.32,"y":26.23},{"x":42.73,"y":25.59},{"x":40.98,"y":24.75},{"x":38.86,"y":24.39},{"x":37.12,"y":24.39},{"x":35.3,"y":24.39},{"x":33.79,"y":24.39},{"x":32.27,"y":23.47},{"x":30.76,"y":22.5},{"x":29.02,"y":22.38},{"x":27.42,"y":22.26},{"x":25.91,"y":22.14},{"x":24.09,"y":22.14},{"x":22.35,"y":22.3},{"x":20.61,"y":22.78},{"x":18.64,"y":23.27},{"x":16.67,"y":23.71},{"x":14.77,"y":24.23},{"x":13.18,"y":24.79},{"x":11.44,"y":25.47},{"x":9.92,"y":26.07},{"x":8.18,"y":27.04},{"x":6.74,"y":28},{"x":5.53,"y":29.16},{"x":4.39,"y":30.65},{"x":3.26,"y":31.69},{"x":1.89,"y":32.97},{"x":0.91,"y":34.3},{"x":0.38,"y":35.98},{"x":0.38,"y":37.63},{"x":0.38,"y":39.71}];
+    const RIGHT_MESH = [{"x":96.36,"y":29.36},{"x":97.88,"y":29.48},{"x":96.06,"y":29.44},{"x":93.94,"y":28.88},{"x":92.42,"y":28.28},{"x":90.83,"y":27.52},{"x":89.09,"y":27.04},{"x":87.12,"y":26.55},{"x":85.45,"y":26.03},{"x":83.56,"y":25.23},{"x":81.89,"y":24.51},{"x":80.23,"y":23.99},{"x":78.26,"y":23.47},{"x":76.74,"y":23.27},{"x":74.92,"y":23.23},{"x":73.18,"y":23.23},{"x":71.14,"y":23.23},{"x":68.94,"y":23.23},{"x":66.82,"y":23.23},{"x":64.77,"y":23.27},{"x":62.88,"y":23.35},{"x":61.06,"y":23.59},{"x":59.17,"y":24.15},{"x":57.73,"y":24.79},{"x":56.14,"y":25.55},{"x":54.7,"y":26.51},{"x":53.33,"y":27.64},{"x":51.82,"y":29},{"x":50.76,"y":30.28},{"x":50,"y":31.77},{"x":50,"y":33.57},{"x":49.85,"y":35.54},{"x":49.47,"y":37.63},{"x":48.79,"y":40.07},{"x":48.26,"y":42.28},{"x":48.11,"y":43.92},{"x":48.11,"y":45.65},{"x":48.41,"y":47.49},{"x":49.02,"y":49.1},{"x":49.62,"y":50.78},{"x":50.3,"y":52.27},{"x":51.21,"y":53.51},{"x":52.2,"y":54.71},{"x":53.33,"y":55.8},{"x":55.3,"y":56.84},{"x":57.2,"y":57.2},{"x":59.62,"y":57.68},{"x":62.05,"y":58.2},{"x":64.55,"y":58.64},{"x":67.05,"y":58.92},{"x":71.29,"y":59.45},{"x":73.18,"y":59.57},{"x":75.23,"y":59.57},{"x":77.35,"y":59.57},{"x":79.39,"y":59.57},{"x":81.21,"y":59.57},{"x":83.41,"y":59.57},{"x":85,"y":59.73},{"x":86.59,"y":60.33},{"x":88.56,"y":60.45},{"x":90.3,"y":60.45},{"x":92.12,"y":60.45},{"x":93.94,"y":60.45},{"x":95.45,"y":60.21},{"x":97.12,"y":59.13},{"x":98.56,"y":58.28},{"x":98.94,"y":56.8},{"x":98.94,"y":54.67},{"x":98.94,"y":52.99},{"x":98.94,"y":51.38},{"x":98.94,"y":49.26},{"x":99.02,"y":47.53},{"x":99.47,"y":45.93},{"x":99.55,"y":44.24},{"x":99.55,"y":42.52},{"x":99.55,"y":40.35},{"x":99.55,"y":38.35},{"x":99.55,"y":36.66},{"x":99.55,"y":34.94},{"x":98.33,"y":33.45},{"x":96.36,"y":32.41},{"x":94.47,"y":31.29},{"x":92.88,"y":29.96},{"x":91.74,"y":28.48},{"x":90.61,"y":27.2},{"x":89.17,"y":26.47},{"x":87.58,"y":25.63},{"x":86.14,"y":24.83}];
+
+    const isPointInPolygon = (x, y, polygon) => {
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        let xi = polygon[i].x, yi = polygon[i].y;
+        let xj = polygon[j].x, yj = polygon[j].y;
+        let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    };
+
+    function App() {
+      const [appState, setAppState] = useState('init'); 
+      const [hasMounted, setHasMounted] = useState(false);
+      const [isFadingOut, setIsFadingOut] = useState(false);
+      
+      const [showSettings, setShowSettings] = useState(false);
+      const [fxPage, setFxPage] = useState(0); 
+      const [ripples, setRipples] = useState([]);
+      const [blushMarks, setBlushMarks] = useState([]);
+      
+      const [params, setParams] = useState({ 
+        kickVol: 1.0, snareVol: 1.0, hatVol: 1.0, clapVol: 1.0, 
+        masterPitch: 1.0, kickPitch: 1.0, snarePitch: 1.0, hatPitch: 1.0, clapPitch: 1.0,
+        kickDecay: 1.0, snareDecay: 0.8, hatDecay: 0.5, clapDecay: 1.0,
+        drive: 0.0, reverb: 0.0, filterFreq: 100.0, filterRes: 0.0
+      });
+
+      // Ref to track appState for the animation loop
+      const appStateRef = useRef(appState);
+      useEffect(() => { appStateRef.current = appState; }, [appState]);
+
+      // Rack Draggable State
+      const [rackOffset, setRackOffset] = useState({ x: 0, y: 0 });
+      const dragRef = useRef(null);
+
+      const containerRef = useRef(null);
+      const threeContext = useRef(null);
+
+      useEffect(() => {
+        let isMounted = true;
+        
+        // Trigger elegant fade-in slightly after mount
+        const fadeTimer = setTimeout(() => {
+          if (isMounted) setHasMounted(true);
+        }, 100);
+
+        const loadThree = () => {
+          if (!window.THREE) {
+            const script = document.createElement('script');
+            script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
+            script.onload = () => { if (isMounted) initThreeJS(); };
+            document.head.appendChild(script);
+          } else {
+            initThreeJS();
+          }
+        };
+        loadThree();
+
+        return () => { 
+          isMounted = false; 
+          clearTimeout(fadeTimer);
+        };
+      }, []);
+
+      useEffect(() => {
+        if (appState === 'play') {
+          audioEngine.setFilter(params.filterFreq, params.filterRes);
+          audioEngine.setDrive(params.drive);
+          audioEngine.setReverb(params.reverb);
+        }
+      }, [params.filterFreq, params.filterRes, params.drive, params.reverb, appState]);
+
+      const startEngine = async () => {
+        if (appState !== 'init') return;
+        setAppState('loading_audio');
+        setIsFadingOut(true); // Trigger the natural CSS fade-out for the title screen
+        
+        // Let the fade run concurrently with audio initialization 
+        // Force minimum 1 second delay to ensure the elegant fade-out is visible
+        await Promise.all([
+          audioEngine.init(),
+          new Promise(resolve => setTimeout(resolve, 1000))
+        ]);
+
+        if (audioEngine.ctx?.state !== 'running') await audioEngine.ctx?.resume();
+        
+        setAppState('play');
+      };
+
+      const initThreeJS = () => {
+        if (threeContext.current) return;
+        
+        const THREE = window.THREE;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const scene = new THREE.Scene();
+        const fov = 45;
+        const camera = new THREE.PerspectiveCamera(fov, width / height, 0.1, 2000);
+        const cameraZ = (height / 2) / Math.tan((fov / 2) * (Math.PI / 180));
+        camera.position.z = cameraZ;
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        
+        const geometry = new THREE.PlaneGeometry(width, height, 70, 70);
+        const positionAttribute = geometry.attributes.position;
+        const vertexCount = positionAttribute.count;
+        
+        const originalPositions = new Float32Array(vertexCount * 3);
+        const velocities = new Float32Array(vertexCount);
+        const vertexWeights = new Float32Array(vertexCount);
+        const vertexSides = new Int8Array(vertexCount); 
+        
+        for (let i = 0; i < vertexCount; i++) {
+          const vx = positionAttribute.getX(i);
+          const vy = positionAttribute.getY(i);
+          const vz = positionAttribute.getZ(i);
+          
+          originalPositions[i*3] = vx;
+          originalPositions[i*3+1] = vy;
+          originalPositions[i*3+2] = vz;
+          velocities[i] = 0;
+
+          const normX = ((vx + width / 2) / width) * 100;
+          const normY = ((-vy + height / 2) / height) * 100;
+
+          const isLeft = isPointInPolygon(normX, normY, LEFT_MESH);
+          const isRight = isPointInPolygon(normX, normY, RIGHT_MESH);
+
+          if (isLeft) {
+            vertexSides[i] = -1;
+            const dx = normX - 36;
+            const dy = normY - 52;
+            const directionalY = dy < 0 ? dy * 0.85 : dy; 
+            const distToEpicenter = Math.sqrt(Math.pow(dx, 2) + Math.pow(directionalY, 2));
+            vertexWeights[i] = Math.max(0.3, 1.5 - (distToEpicenter / 35)); 
+          } else if (isRight) {
+            vertexSides[i] = 1;
+            const dx = normX - 64;
+            const dy = normY - 52;
+            const directionalY = dy < 0 ? dy * 0.85 : dy; 
+            const distToEpicenter = Math.sqrt(Math.pow(dx, 2) + Math.pow(directionalY, 2));
+            vertexWeights[i] = Math.max(0.3, 1.5 - (distToEpicenter / 35));
+          } else {
+            vertexSides[i] = 0;
+            vertexWeights[i] = 0.0;
+          }
+        }
+
+        const loader = new THREE.TextureLoader();
+        loader.load(MESH_IMAGE_URL, (texture) => {
+          const imgAspect = texture.image.width / texture.image.height;
+          const screenAspect = width / height;
+
+          if (screenAspect > imgAspect) {
+            texture.repeat.set(1, imgAspect / screenAspect);
+            texture.offset.set(0, (1 - (imgAspect / screenAspect)) / 2);
+          } else {
+            texture.repeat.set(screenAspect / imgAspect, 1);
+            texture.offset.set((1 - (screenAspect / imgAspect)) / 2, 0);
+          }
+
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+
+          const material = new THREE.MeshBasicMaterial({ map: texture });
+          const mesh = new THREE.Mesh(geometry, material);
+          scene.add(mesh);
+
+          threeContext.current = {
+            scene, camera, renderer, mesh, 
+            originalPositions, velocities, vertexWeights, vertexSides,
+            width, height, reqId: null
+          };
+
+          if (containerRef.current) {
+            containerRef.current.innerHTML = '';
+            containerRef.current.appendChild(renderer.domElement);
+          }
+          
+          animate();
+        });
+
+        const animate = () => {
+          if (!threeContext.current) return;
+          const { renderer, scene, camera, velocities, originalPositions, vertexWeights, mesh } = threeContext.current;
+          const positions = mesh.geometry.attributes.position;
+          
+          const tension = 0.40; 
+          const damping = 0.75; 
+          let needsUpdate = false;
+
+          // Make the 3D Canvas breathe during the title screen / loading phase!
+          if (appStateRef.current === 'init' || appStateRef.current === 'loading_audio') {
+            const time = Date.now() * 0.002;
+            for (let i = 0; i < positions.count; i++) {
+              if (vertexWeights[i] > 0) {
+                 // Gently undulate the mesh at the interaction points
+                 velocities[i] += Math.sin(time - vertexWeights[i] * 4) * 0.06 * vertexWeights[i];
+              }
+            }
+          }
+
+          for (let i = 0; i < positions.count; i++) {
+            if (vertexWeights[i] === 0) continue;
+
+            let z = positions.getZ(i);
+            let origZ = originalPositions[i * 3 + 2];
+            let vel = velocities[i];
+
+            vel += (origZ - z) * tension;
+            vel *= damping;
+            z += vel;
+
+            if (Math.abs(vel) > 0.01 || Math.abs(z - origZ) > 0.01) {
+              velocities[i] = vel;
+              positions.setZ(i, z);
+              needsUpdate = true;
+            }
+          }
+
+          if (needsUpdate) positions.needsUpdate = true;
+          renderer.render(scene, camera);
+          threeContext.current.reqId = requestAnimationFrame(animate);
+        };
+      };
+
+      useEffect(() => {
+        return () => {
+          if (threeContext.current) {
+            cancelAnimationFrame(threeContext.current.reqId);
+            containerRef.current?.removeChild(threeContext.current.renderer.domElement);
+          }
+        };
+      }, []);
+
+      const handleInteraction = (clientX, clientY) => {
+        if (appState !== 'init' && appState !== 'play') return;
+        if (!threeContext.current) return;
+
+        const { width, height, velocities, originalPositions, vertexWeights, vertexSides, mesh } = threeContext.current;
+        const hitPercentX = (clientX / width) * 100;
+        const hitPercentY = (clientY / height) * 100;
+
+        const isLeft = isPointInPolygon(hitPercentX, hitPercentY, LEFT_MESH);
+        const isRight = isPointInPolygon(hitPercentX, hitPercentY, RIGHT_MESH);
+
+        if (!isLeft && !isRight) return; 
+
+        const hitSide = isLeft ? -1 : 1;
+        let zoneFirmness = 1.0;
+
+        if (isLeft) {
+          if (appState === 'play') {
+            if (hitPercentY < 41) {
+              audioEngine.playSample('clap', {
+                volume: params.clapVol, pitch: params.masterPitch * params.clapPitch, 
+                decay: params.clapDecay, sendReverb: true
+              });
+            } else {
+              audioEngine.playSample('kick', {
+                volume: params.kickVol, pitch: params.masterPitch * params.kickPitch, 
+                decay: params.kickDecay, sendReverb: false
+              });
+            }
+          }
+          const dx = hitPercentX - 36;
+          const dy = hitPercentY - 52;
+          const directionalY = dy < 0 ? dy * 0.85 : dy;
+          const dist = Math.sqrt(Math.pow(dx, 2) + Math.pow(directionalY, 2));
+          zoneFirmness = Math.max(0.3, 1.5 - (dist / 35)); 
+        } else if (isRight) {
+          if (appState === 'play') {
+            if (hitPercentY < 41) {
+              audioEngine.playSample('hat', {
+                volume: params.hatVol, pitch: params.masterPitch * params.hatPitch, 
+                decay: params.hatDecay, sendReverb: false 
+              });
+            } else {
+              audioEngine.playSample('snare', {
+                volume: params.snareVol, pitch: params.masterPitch * params.snarePitch, 
+                decay: params.snareDecay, sendReverb: true
+              });
+            }
+          }
+          const dx = hitPercentX - 64;
+          const dy = hitPercentY - 52;
+          const directionalY = dy < 0 ? dy * 0.85 : dy;
+          const dist = Math.sqrt(Math.pow(dx, 2) + Math.pow(directionalY, 2));
+          zoneFirmness = Math.max(0.3, 1.5 - (dist / 35)); 
+        }
+
+        const worldX = clientX - width / 2;
+        const worldY = -(clientY - height / 2);
+        const positions = mesh.geometry.attributes.position;
+        
+        const baseRadius = Math.min(width, height) * 0.30;
+        const impactRadius = baseRadius * Math.min(1.2, zoneFirmness); 
+        const baseForce = -350;
+        const impactForce = baseForce * zoneFirmness; 
+
+        for (let i = 0; i < positions.count; i++) {
+          if (vertexWeights[i] === 0) continue; 
+          const vx = originalPositions[i * 3];
+          const vy = originalPositions[i * 3 + 1];
+          const dist = Math.sqrt((vx - worldX) ** 2 + (vy - worldY) ** 2);
+
+          if (dist < impactRadius) {
+            const falloff = Math.pow(1 - (dist / impactRadius), 2);
+            const crossCheekDampener = (vertexSides[i] !== hitSide && vertexSides[i] !== 0) ? 0.12 : 1.0;
+            velocities[i] += impactForce * falloff * vertexWeights[i] * crossCheekDampener;
+          }
+        }
+
+        // --- Visual FX: Shockwave Ripples ---
+        const shockwaveScale = Math.max(0.4, zoneFirmness);
+        const id = Date.now() + Math.random();
+        setRipples(prev => [...prev.slice(-4), { id, x: clientX, y: clientY, scale: shockwaveScale }]);
+        setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 400);
+
+        // --- Visual Easter Egg: Saturation Blush/Spank Marks ---
+        if (params.drive > 1.0 && appState === 'play') {
+          // Saturation maps to blush intensity (Scaled way down for absolute subtle realism)
+          const intensity = (params.drive / 100) * 0.35; 
+          const rot = Math.random() * 45 - 22.5; // Randomize slap angle slightly
+          const bId = Date.now() + Math.random();
+          
+          setBlushMarks(prev => [...prev.slice(-3), { id: bId, x: clientX, y: clientY, intensity, rot }]);
+          
+          // Allow fade out time before unmounting
+          setTimeout(() => setBlushMarks(prev => prev.filter(b => b.id !== bId)), 2500);
+        }
+      };
+
+      const handlePointerDownCanvas = (e) => {
+        if (e.pointerType === 'touch') return; 
+        handleInteraction(e.clientX, e.clientY);
+      };
+
+      const handleTouchStartCanvas = (e) => {
+        for (let i = 0; i < e.touches.length; i++) {
+          handleInteraction(e.touches[i].clientX, e.touches[i].clientY);
+        }
+      };
+
+      const updateParam = (key, value) => {
+        setParams(prev => ({ ...prev, [key]: value }));
+      };
+
+      // Rack Drag Handlers
+      const handleDragStart = (e) => {
+        e.target.setPointerCapture(e.pointerId);
+        dragRef.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            initialX: rackOffset.x,
+            initialY: rackOffset.y
+        };
+      };
+
+      const handleDragMove = (e) => {
+        if (!dragRef.current) return;
+        const dx = e.clientX - dragRef.current.startX;
+        const dy = e.clientY - dragRef.current.startY;
+        setRackOffset({
+            x: dragRef.current.initialX + dx,
+            y: dragRef.current.initialY + dy
+        });
+      };
+
+      const handleDragEnd = (e) => {
+        if (dragRef.current) {
+            e.target.releasePointerCapture(e.pointerId);
+            dragRef.current = null;
+        }
+      };
+
+      const filterOverlayOpacity = appState === 'play' ? Math.max(0, (100 - params.filterFreq) / 100 * 0.6) : 0;
+
+      return (
+        <div className="fixed inset-0 w-screen h-screen bg-black text-white font-sans overflow-hidden touch-none selection:bg-pink-500">
+          
+          {/* Main Three.js Canvas (Bottom Layer) */}
+          <div 
+            ref={containerRef}
+            className={`absolute inset-0 w-full h-full cursor-crosshair z-0 transition-opacity duration-1000 ease-in-out ${hasMounted ? 'opacity-100' : 'opacity-0'}`}
+            onPointerDown={handlePointerDownCanvas}
+            onTouchStart={handleTouchStartCanvas}
+          />
+
+          {/* Skin Reaction Layer: Subtle Realistic Blood Red Blush */}
+          <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+            {blushMarks.map(b => (
+              <div
+                key={b.id}
+                className="absolute rounded-full"
+                style={{
+                  left: b.x,
+                  top: b.y,
+                  width: '140px',
+                  height: '90px',
+                  // Multiply blends perfectly into the skin tones making it look physically reactive
+                  mixBlendMode: 'multiply',
+                  // Realistic blood red pooling under the skin
+                  background: 'radial-gradient(ellipse at center, rgba(190, 20, 20, 0.8) 0%, rgba(190, 20, 20, 0.3) 45%, rgba(190, 20, 20, 0) 75%)',
+                  '--blush-intensity': b.intensity,
+                  animation: 'blush-fade 2.5s ease-out forwards',
+                  transform: `translate(-50%, -50%) rotate(${b.rot}deg)`
+                }}
+              />
+            ))}
+          </div>
+
+          {/* --- RED VELVET DOOR TITLE SCREEN (With Natural Fade Transitions) --- */}
+          {appState !== 'play' && (
+            <div 
+              className={`absolute inset-0 z-10 flex flex-col items-center justify-center p-6 overflow-hidden select-none pointer-events-none transition-opacity duration-1000 ease-in-out ${hasMounted && !isFadingOut ? 'opacity-100' : 'opacity-0'}`}
+            >
+              
+              {/* Full Screen Door Image Overlay (Transparent Cutout) */}
+              <div 
+                className="door-alive absolute inset-0 z-0 pointer-events-none"
+                style={{ 
+                  backgroundImage: `url(${DOOR_IMAGE_URL})`, 
+                  backgroundSize: 'cover', 
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                }} 
+              />
+              
+              {/* Center Content Stack */}
+              <div className="relative z-30 flex flex-col items-center justify-center w-full max-w-5xl gap-6 sm:gap-10">
+                
+                {/* Window Cutout Container (Interaction area mapped over the hole) */}
+                <div className="relative group w-[280px] sm:w-[420px] md:w-[480px] aspect-square flex items-center justify-center pointer-events-auto">
+                  {/* Interaction Receiver (Size 92% to cover the empty hole) */}
+                  <div 
+                    className="absolute w-[92%] h-[92%] translate-y-[2.5%] rounded-full z-20 cursor-pointer"
+                    onPointerDown={handlePointerDownCanvas}
+                    onTouchStart={handleTouchStartCanvas}
+                  />
+                </div>
+
+                {/* Highly Realistic Sharpie Typography */}
+                <div className="text-alive text-center flex flex-col items-center relative pointer-events-auto mt-2">
+                  <h1 
+                    className="text-7xl sm:text-9xl md:text-[11rem] font-bold leading-none relative z-10 font-['Caveat'] text-white opacity-95"
+                    style={{ 
+                      // Tight physical ink shadows with a very faint white specularity (wet ink gloss)
+                      textShadow: '1px 2px 3px rgba(0,0,0,0.8), 0 0 1px rgba(255,255,255,0.4)',
+                    }}
+                  >
+                    Cheeky Drums
+                  </h1>
+                </div>
+
+                {/* Realistic Tape Label Start Button */}
+                <div className="btn-alive flex flex-col items-center w-full z-20 pointer-events-auto mt-2">
+                  <button
+                    disabled={isFadingOut || appState !== 'init'}
+                    onClick={startEngine}
+                    className="group relative flex items-center justify-center px-12 h-16 sm:h-20 bg-[#151515] border-y border-white/5 shadow-[0_6px_15px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.1)] hover:bg-[#1a1a1a] transition-colors duration-200 disabled:opacity-50"
+                  >
+                    {appState === 'init' && !isFadingOut ? (
+                      <div className="flex items-center gap-3 relative z-10 pt-1">
+                        <span 
+                          className="font-['Caveat'] text-4xl sm:text-5xl font-bold tracking-wide text-white opacity-95"
+                          style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.9), 0 0 1px rgba(255,255,255,0.2)' }}
+                        >
+                          Push to Start
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-4 relative z-10 text-neutral-300 pt-1">
+                        <div className="w-6 h-6 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+                        <span 
+                          className="font-['Caveat'] text-4xl sm:text-5xl font-bold tracking-wide text-white opacity-95"
+                          style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.9), 0 0 1px rgba(255,255,255,0.2)' }}
+                        >
+                          Loading...
+                        </span>
+                      </div>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Design Credentials Footer */}
+              <div className="absolute bottom-4 left-0 w-full text-center z-50 pointer-events-none">
+                 <p className="text-[10px] sm:text-xs text-white/50 font-mono tracking-widest uppercase drop-shadow-md">
+                   &copy; {new Date().getFullYear()} Media Mack Studios. All rights reserved.
+                 </p>
+              </div>
+
+            </div>
+          )}
+
+          {/* Dynamic Frequency Filter Tint Overlay */}
+          <div 
+            className="absolute inset-0 pointer-events-none mix-blend-color transition-opacity duration-100 z-30"
+            style={{ backgroundColor: '#f97316', opacity: filterOverlayOpacity }}
+          />
+
+          {/* Interaction Impact Ripples */}
+          {ripples.map(r => (
+            <div 
+              key={r.id}
+              className="absolute pointer-events-none rounded-full border-pink-400/50 shadow-[0_0_20px_rgba(236,72,153,0.5)] z-50"
+              style={{
+                left: r.x,
+                top: r.y,
+                transform: `translate(-50%, -50%) scale(${r.scale})`,
+                animation: 'massive-shockwave 0.4s cubic-bezier(0.1, 0.8, 0.3, 1) forwards'
+              }}
+            />
+          ))}
+
+          {appState === 'play' && (
+            <>
+              {/* Square FX Toggle Button with Sharpie Font */}
+              <button 
+                onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}
+                className="absolute top-6 right-6 z-50 w-14 h-14 bg-black/70 backdrop-blur-2xl text-white rounded-xl flex items-center justify-center border-2 border-white/20 shadow-2xl active:scale-90 transition-all hover:bg-black hover:border-pink-500"
+              >
+                <span className="font-['Caveat'] text-3xl font-bold mt-1 tracking-wider drop-shadow-md">FX</span>
+              </button>
+
+              {/* Hardware Shell UX Rack (Draggable) */}
+              <div 
+                className={`absolute z-40 w-[350px] md:w-[400px] h-[550px] flex flex-col bg-[#242424] text-white rounded-2xl transition-opacity duration-300 select-none shadow-[0_30px_60px_rgba(0,0,0,0.9),inset_0_2px_15px_rgba(255,255,255,0.05),inset_0_-5px_20px_rgba(0,0,0,0.5)] border-2 border-[#333] ${showSettings ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ 
+                    top: '6rem', 
+                    right: '1.5rem', 
+                    transform: `translate3d(${rackOffset.x}px, ${rackOffset.y}px, 0)`
+                }}
+                onPointerDown={(e) => e.stopPropagation()} 
+                onTouchStart={(e) => e.stopPropagation()}
+              >
+                {/* Draggable Sharpie Header */}
+                <div 
+                  className="pt-6 pb-2 text-center bg-gradient-to-b from-[#1c1c1c] to-[#242424] border-b border-[#111] cursor-move touch-none"
+                  onPointerDown={handleDragStart}
+                  onPointerMove={handleDragMove}
+                  onPointerUp={handleDragEnd}
+                  onPointerCancel={handleDragEnd}
+                >
+                  <h2 className="text-white text-[2.5rem] font-['Caveat'] rotate-[-3deg] tracking-wide inline-block drop-shadow-md pointer-events-none">
+                    FX RACK 💋
+                  </h2>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex bg-[#1a1a1a] border-b-2 border-[#111] shadow-[inset_0_2px_10px_rgba(0,0,0,0.8)]">
+                  {['MASTER', 'MIXER', 'SHAPING'].map((tab, idx) => (
+                    <button 
+                      key={tab}
+                      onClick={() => setFxPage(idx)}
+                      className={`flex-1 py-3 text-xs font-bold font-mono tracking-widest uppercase transition-colors ${fxPage === idx ? 'bg-[#333] text-pink-400 shadow-[inset_0_3px_0_#ec4899]' : 'text-neutral-500 hover:text-neutral-300 hover:bg-[#222]'}`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tab Content Pages */}
+                <div className="flex-1 overflow-hidden p-2 relative bg-[#242424]">
+                  
+                  {/* Page 0: Master */}
+                  {fxPage === 0 && (
+                    <div className="grid grid-cols-2 gap-y-4 gap-x-2 h-full content-center p-2">
+                      <HardwareSlider label="L-PASS FILTER" value={params.filterFreq} min={0.0} max={100.0} onChange={(v) => updateParam('filterFreq', v)} color="#f97316" />
+                      <HardwareSlider label="RESONANCE" value={params.filterRes} min={0.0} max={100.0} onChange={(v) => updateParam('filterRes', v)} color="#f97316" />
+                      
+                      {/* Renamed TAPE DRIVE to TAPE SATURATION for the Easter Egg context */}
+                      <HardwareSlider label="TAPE SATURATION" value={params.drive} min={0.0} max={100.0} onChange={(v) => updateParam('drive', v)} color="#ef4444" />
+                      <HardwareSlider label="ROOM REVERB" value={params.reverb} min={0.0} max={100.0} onChange={(v) => updateParam('reverb', v)} color="#3b82f6" />
+                    </div>
+                  )}
+
+                  {/* Page 1: Mixer */}
+                  {fxPage === 1 && (
+                    <div className="grid grid-cols-2 gap-y-4 gap-x-2 h-full content-center p-2">
+                      <HardwareSlider label="KICK VOL" value={params.kickVol} min={0.0} max={2.0} step={0.1} onChange={(v) => updateParam('kickVol', v)} color="#ec4899" />
+                      <HardwareSlider label="SNARE VOL" value={params.snareVol} min={0.0} max={2.0} step={0.1} onChange={(v) => updateParam('snareVol', v)} color="#ec4899" />
+                      <HardwareSlider label="HAT VOL" value={params.hatVol} min={0.0} max={2.0} step={0.1} onChange={(v) => updateParam('hatVol', v)} color="#ec4899" />
+                      <HardwareSlider label="CLAP VOL" value={params.clapVol} min={0.0} max={2.0} step={0.1} onChange={(v) => updateParam('clapVol', v)} color="#ec4899" />
+                    </div>
+                  )}
+
+                  {/* Page 2: Shaping (9 controls, using 3x3 compact grid) */}
+                  {fxPage === 2 && (
+                    <div className="grid grid-cols-3 gap-y-3 gap-x-1 h-full content-center px-1">
+                      <HardwareSlider compact label="GLOBAL PITCH" value={params.masterPitch} min={0.5} max={2.0} step={0.05} onChange={(v) => updateParam('masterPitch', v)} color="#a855f7" />
+                      <HardwareSlider compact label="KICK PITCH" value={params.kickPitch} min={0.5} max={2.0} step={0.05} onChange={(v) => updateParam('kickPitch', v)} color="#2dd4bf" />
+                      <HardwareSlider compact label="KICK DECAY" value={params.kickDecay} min={0.1} max={2.0} step={0.1} onChange={(v) => updateParam('kickDecay', v)} color="#2dd4bf" />
+                      
+                      <HardwareSlider compact label="SNARE PITCH" value={params.snarePitch} min={0.5} max={2.0} step={0.05} onChange={(v) => updateParam('snarePitch', v)} color="#eab308" />
+                      <HardwareSlider compact label="SNARE DECAY" value={params.snareDecay} min={0.1} max={2.0} step={0.1} onChange={(v) => updateParam('snareDecay', v)} color="#eab308" />
+                      <HardwareSlider compact label="HAT PITCH" value={params.hatPitch} min={0.5} max={2.0} step={0.05} onChange={(v) => updateParam('hatPitch', v)} color="#8b5cf6" />
+                      
+                      <HardwareSlider compact label="HAT DECAY" value={params.hatDecay} min={0.1} max={2.0} step={0.1} onChange={(v) => updateParam('hatDecay', v)} color="#8b5cf6" />
+                      <HardwareSlider compact label="CLAP PITCH" value={params.clapPitch} min={0.5} max={2.0} step={0.05} onChange={(v) => updateParam('clapPitch', v)} color="#f43f5e" />
+                      <HardwareSlider compact label="CLAP DECAY" value={params.clapDecay} min={0.1} max={2.0} step={0.1} onChange={(v) => updateParam('clapDecay', v)} color="#f43f5e" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-[#1a1a1a] py-2 border-t border-[#111]">
+                   <p className="text-[9px] text-[#555] font-mono tracking-widest text-center shadow-inner">CHEEKY DRUMS V2.0 // MEDIA MACK</p>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // --- HORIZONTAL HARDWARE SLIDER COMPONENT ---
+    function HardwareSlider({ label, value, min, max, step = 1, onChange, color = "#ec4899", compact = false }) {
+      return (
+        <div className="flex flex-col items-center justify-center w-full px-2">
+          {/* Label */}
+          <span className={`font-mono font-bold text-neutral-400 tracking-wide text-center drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)] mb-2 mt-1 ${compact ? 'text-[9px]' : 'text-xs'}`}>
+            {label}
+          </span>
+          
+          {/* Custom Hardware Shell Slider Base with explicit height container */}
+          <div className={`relative w-full flex flex-col items-center justify-center ${compact ? 'h-[26px]' : 'h-[34px]'}`}>
+            
+            {/* Outer shell shadow / bevel */}
+            <div className="absolute w-full h-full rounded-full bg-gradient-to-b from-[#323232] to-[#161616] shadow-[inset_1px_-2px_2px_rgba(0,0,0,0.25)]"></div>
+            
+            {/* Inner track recess */}
+            <div className={`absolute w-[95%] ${compact ? 'h-[16px]' : 'h-[24px]'} rounded-full bg-gradient-to-b from-[#292929] to-[#1B1B1B]`}></div>
+            
+            {/* HTML Input Range overriding default styles via CSS class */}
+            <input 
+              type="range" min={min} max={max} step={step} value={value} 
+              onChange={(e) => onChange(parseFloat(e.target.value))}
+              className={`hw-slider absolute w-[90%] z-10 ${compact ? 'compact-thumb h-2' : 'h-3'}`}
+            />
+          </div>
+
+          {/* Tick lines (lines-fx equivalent) */}
+          <div className={`flex justify-between w-[85%] px-1 ${compact ? 'mt-3' : 'mt-4'}`}>
+            {[...Array(11)].map((_, i) => (
+              <div key={i} className={`w-[1px] bg-[#111] shadow-[1px_0_0_rgba(255,255,255,0.1)] ${i % 5 === 0 ? 'h-2.5' : 'h-1.5'}`}></div>
+            ))}
+          </div>
+
+          {/* Digital Readout */}
+          <div className="mt-2 flex items-center justify-center bg-[#111312] px-3 py-1 rounded shadow-[inset_0_0_6px_rgba(0,0,0,1)] border-b border-[#333]">
+            <span 
+              className={`font-['Orbitron'] tracking-widest ${compact ? 'text-xs' : 'text-sm'}`} 
+              style={{ color: color, textShadow: `0 0 6px ${color}90` }}
+            >
+              {Number(value).toFixed(step < 1 ? 2 : 0)}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
